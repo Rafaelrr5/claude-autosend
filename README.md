@@ -1,6 +1,6 @@
 # claude-autosend
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json) [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#requirements)
+[![CI](https://github.com/Rafaelrr5/claude-autosend/actions/workflows/ci.yml/badge.svg)](https://github.com/Rafaelrr5/claude-autosend/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json) [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#requirements)
 
 Schedule prompts to fire into [Claude Code](https://claude.com/claude-code) CLI sessions at a chosen wall-clock time.
 
@@ -67,9 +67,9 @@ Read [SECURITY.md](SECURITY.md) before you do. This is deliberately opt-in.
 ## Usage
 
 1. Enter the target time as four digits, `HHMM` (e.g. `0400`).
-2. Add one or more sessions — **NOVA** for a new terminal, **EXISTENTE** to pick a live window.
+2. Add one or more sessions — **New Claude session** for a fresh terminal, **Existing window** to pick a live one.
 3. Write a prompt for each session.
-4. Submit. The schedule shows up below with a live countdown and a cancel button.
+4. Press **Schedule**. It shows up below with a live countdown and a cancel button.
 
 If the time has already passed today, it is scheduled for tomorrow.
 
@@ -92,7 +92,6 @@ Session object: `{ type: "new" \| "existing", prompt: string, label?: string, pi
 - **A job whose time passed while the server was down never fires.** Pending schedules survive a restart (they are written to `DATA_FILE` and re-armed on boot), but anything already overdue is marked `missed` rather than fired late.
 - **The machine must stay awake.** Sleep or hibernation stops the timer.
 - **`SendKeys` needs the desktop.** Existing-window delivery steals focus and fails on a locked workstation.
-- **UI strings are Portuguese.** Docs and code are English; the interface has not been translated yet — a good first contribution.
 
 ## Contributing
 
