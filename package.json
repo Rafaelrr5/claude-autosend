@@ -1,0 +1,38 @@
+{
+  "name": "claude-autosend",
+  "version": "1.0.0",
+  "description": "Schedule prompts to fire into Claude Code CLI sessions at a given wall-clock time — useful for queueing work against a usage-limit reset.",
+  "main": "server.js",
+  "license": "MIT",
+  "author": "Rafaelrr5",
+  "homepage": "https://github.com/Rafaelrr5/claude-autosend#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rafaelrr5/claude-autosend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Rafaelrr5/claude-autosend/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "scheduler",
+    "automation",
+    "cli",
+    "windows"
+  ],
+  "os": [
+    "win32"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
