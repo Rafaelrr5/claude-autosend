@@ -15,6 +15,10 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-      - run: npm ci
+      # package.json declares os: ["win32"], which npm enforces on the root
+      # package too, so a plain `npm ci` fails on the Linux runner. --force
+      # skips that platform check. Only express is installed and it is
+      # platform-agnostic; the win32 guard that matters is in server.js.
+      - run: npm ci --force
       - run: npm run check
       - run: npm test
