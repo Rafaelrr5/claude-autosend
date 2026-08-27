@@ -1,6 +1,10 @@
 # claude-autosend
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json) [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#requirements)
+
 Schedule prompts to fire into [Claude Code](https://claude.com/claude-code) CLI sessions at a chosen wall-clock time.
+
+![claude-autosend web UI: trigger time, sessions, and pending schedules with live countdowns](docs/screenshot.png)
 
 Built for one specific annoyance: you hit a usage limit at 22:00, it resets at 04:00, and you would rather not set an alarm. Queue the prompts, go to sleep, read the results in the morning.
 
@@ -48,6 +52,7 @@ All settings are environment variables — see [`.env.example`](.env.example).
 | `CLAUDE_WORKDIR` | current directory | Directory Claude Code is launched in |
 | `CLAUDE_FLAGS` | *(empty)* | Extra flags for the `claude` CLI |
 | `TZ_NAME` | `America/Sao_Paulo` | IANA timezone for the scheduled time |
+| `DATA_FILE` | `schedules.json` | JSON file pending schedules are written to |
 
 ### Unattended runs
 
@@ -84,7 +89,7 @@ Session object: `{ type: "new" \| "existing", prompt: string, label?: string, pi
 
 ## Known limitations
 
-- **Schedules are in-memory.** Restarting the server drops every pending job. It uses `setTimeout`, not a persistent queue.
+- **A job whose time passed while the server was down never fires.** Pending schedules survive a restart (they are written to `DATA_FILE` and re-armed on boot), but anything already overdue is marked `missed` rather than fired late.
 - **The machine must stay awake.** Sleep or hibernation stops the timer.
 - **`SendKeys` needs the desktop.** Existing-window delivery steals focus and fails on a locked workstation.
 - **UI strings are Portuguese.** Docs and code are English; the interface has not been translated yet — a good first contribution.
