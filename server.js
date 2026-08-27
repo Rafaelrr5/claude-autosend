@@ -18,23 +18,14 @@ const CLAUDE_WORKDIR = process.env.CLAUDE_WORKDIR || process.cwd();
 const CLAUDE_FLAGS = process.env.CLAUDE_FLAGS || '';
 // IANA timezone used to interpret the scheduled HH:MM wall-clock time.
 const TIMEZONE = process.env.TZ_NAME || 'America/Sao_Paulo';
-
-if (process.platform !== 'win32') {
-  console.error('claude-autosend drives Windows windows via PowerShell and only runs on Windows.');
-  console.error(`Detected platform: ${process.platform}`);
-  process.exit(1);
-}
-
-if (!fs.existsSync(CLAUDE_WORKDIR)) {
-  console.error(`CLAUDE_WORKDIR does not exist: ${CLAUDE_WORKDIR}`);
-  process.exit(1);
-}
+// JSON file schedules are persisted to, so a restart does not lose them.
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'schedules.json');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Scheduled jobs live in memory only: restarting the server clears them.
+// Scheduled jobs live in memory and are mirrored to DATA_FILE on every change.
 const schedules = new Map();
 let scheduleIdCounter = 0;
 
@@ -72,11 +63,10 @@ function formatNow(tz = TIMEZONE) {
 }
 
 // Milliseconds until the next occurrence of HHMM in the configured timezone.
-function msUntilTarget(timeStr) {
+function msUntilTarget(timeStr, now = nowInTimezone()) {
   const hours = parseInt(timeStr.slice(0, 2), 10);
   const minutes = parseInt(timeStr.slice(2, 4), 10);
 
-  const now = nowInTimezone();
   const nowSec = now.hour * 3600 + now.minute * 60 + now.second;
   const targetSec = hours * 3600 + minutes * 60;
 
@@ -95,6 +85,52 @@ function isValidTime(timeStr) {
   const h = parseInt(timeStr.slice(0, 2), 10);
   const m = parseInt(timeStr.slice(2, 4), 10);
   return h >= 0 && h <= 23 && m >= 0 && m <= 59;
+}
+
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
+
+// Mirror every schedule to DATA_FILE. Temp file + rename so a crash mid-write
+// leaves the previous good file in place instead of a truncated one.
+function persist() {
+  const rows = [...schedules.values()].map(({ timeoutId, ...rest }) => rest);
+  const tmp = `${DATA_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(rows, null, 2), 'utf8');
+  fs.renameSync(tmp, DATA_FILE);
+}
+
+// Load DATA_FILE and re-arm anything still pending.
+function restore() {
+  let rows;
+  try {
+    rows = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  } catch {
+    return; // no file yet, or unreadable -> start clean
+  }
+  if (!Array.isArray(rows)) return;
+
+  for (const s of rows) {
+    if (s.status !== 'waiting') continue; // executed / cancelled / missed are history
+    scheduleIdCounter = Math.max(scheduleIdCounter, s.id);
+    const remainingMs = Date.parse(s.scheduledAt) - Date.now();
+
+    // A pending job whose time passed while the server was down is marked
+    // 'missed' and never fires. Firing a backlog of agent sessions at boot is
+    // worse than not firing at all — the prompts were written for 04:00, not
+    // for whenever the machine happened to come back.
+    if (!(remainingMs > 0)) {
+      schedules.set(s.id, { ...s, status: 'missed' });
+      continue;
+    }
+
+    s.diffMs = remainingMs;
+    s.diffMinutes = Math.round(remainingMs / 60000);
+    s.timeoutId = setTimeout(() => fire(s.id), remainingMs);
+    schedules.set(s.id, s);
+    console.log(`Schedule #${s.id} re-armed for ${s.time} in ${s.diffMinutes} min`);
+  }
+  persist();
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +228,38 @@ if ($proc -and $proc.MainWindowHandle -ne 0) {
   }
 }
 
+// Deliver every session of a schedule. Called by the timer set at creation
+// time and by restore() after a restart.
+async function fire(id) {
+  const schedule = schedules.get(id);
+  if (!schedule || schedule.status !== 'waiting') return;
+  console.log(`Schedule #${id} fired`);
+
+  const results = [];
+  for (const session of schedule.sessions) {
+    try {
+      if (session.type === 'new') {
+        results.push(await openNewClaudeSession(session.prompt, session.label || `Session-${id}`));
+      } else {
+        results.push(await sendToExistingWindow(session.pid, session.prompt));
+      }
+    } catch (err) {
+      results.push({
+        label: session.label || session.windowTitle,
+        status: 'error',
+        error: err.message
+      });
+    }
+  }
+
+  schedule.status = 'executed';
+  schedule.results = results;
+  schedule.executedAt = new Date().toISOString();
+  persist();
+
+  console.log(`Schedule #${id} results:`, results);
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -215,36 +283,7 @@ app.post('/api/schedule', (req, res) => {
 
   const { diffMs, targetTime, scheduledAt } = msUntilTarget(time);
   const id = ++scheduleIdCounter;
-
-  const timeoutId = setTimeout(async () => {
-    console.log(`Schedule #${id} fired`);
-    const results = [];
-
-    for (const session of sessions) {
-      try {
-        if (session.type === 'new') {
-          results.push(await openNewClaudeSession(session.prompt, session.label || `Session-${id}`));
-        } else {
-          results.push(await sendToExistingWindow(session.pid, session.prompt));
-        }
-      } catch (err) {
-        results.push({
-          label: session.label || session.windowTitle,
-          status: 'error',
-          error: err.message
-        });
-      }
-    }
-
-    const schedule = schedules.get(id);
-    if (schedule) {
-      schedule.status = 'executed';
-      schedule.results = results;
-      schedule.executedAt = new Date().toISOString();
-    }
-
-    console.log(`Schedule #${id} results:`, results);
-  }, diffMs);
+  const timeoutId = setTimeout(() => fire(id), diffMs);
 
   const schedule = {
     id,
@@ -259,6 +298,7 @@ app.post('/api/schedule', (req, res) => {
   };
 
   schedules.set(id, schedule);
+  persist();
 
   console.log(`Schedule #${id} created for ${targetTime} (${TIMEZONE}) in ${schedule.diffMinutes} min, ${sessions.length} session(s)`);
 
@@ -300,6 +340,7 @@ app.delete('/api/schedule/:id', (req, res) => {
   if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
   if (schedule.timeoutId) clearTimeout(schedule.timeoutId);
   schedule.status = 'cancelled';
+  persist();
   res.json({ id, status: 'cancelled' });
 });
 
@@ -321,9 +362,26 @@ app.get('/api/time', (req, res) => {
   });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`claude-autosend running at http://${HOST}:${PORT}`);
-  console.log(`  timezone : ${TIMEZONE}`);
-  console.log(`  workdir  : ${CLAUDE_WORKDIR}`);
-  console.log(`  cli flags: ${CLAUDE_FLAGS || '(none)'}`);
-});
+if (require.main === module) {
+  if (process.platform !== 'win32') {
+    console.error('claude-autosend drives Windows windows via PowerShell and only runs on Windows.');
+    console.error(`Detected platform: ${process.platform}`);
+    process.exit(1);
+  }
+  if (!fs.existsSync(CLAUDE_WORKDIR)) {
+    console.error(`CLAUDE_WORKDIR does not exist: ${CLAUDE_WORKDIR}`);
+    process.exit(1);
+  }
+
+  restore();
+
+  app.listen(PORT, HOST, () => {
+    console.log(`claude-autosend running at http://${HOST}:${PORT}`);
+    console.log(`  timezone : ${TIMEZONE}`);
+    console.log(`  workdir  : ${CLAUDE_WORKDIR}`);
+    console.log(`  cli flags: ${CLAUDE_FLAGS || '(none)'}`);
+    console.log(`  data file: ${DATA_FILE}`);
+  });
+}
+
+module.exports = { msUntilTarget, isValidTime, psq, persist, restore, schedules, DATA_FILE };
