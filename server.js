@@ -120,7 +120,7 @@ function restore() {
     // worse than not firing at all — the prompts were written for 04:00, not
     // for whenever the machine happened to come back.
     if (!(remainingMs > 0)) {
-      schedules.set(s.id, { ...s, status: 'missed' });
+      schedules.set(s.id, { ...s, status: 'missed', diffMs: 0, diffMinutes: 0 });
       continue;
     }
 
@@ -374,6 +374,8 @@ if (require.main === module) {
   }
 
   restore();
+  // Write once at boot: an unwritable DATA_FILE must fail now, not at 04:00.
+  persist();
 
   app.listen(PORT, HOST, () => {
     console.log(`claude-autosend running at http://${HOST}:${PORT}`);
