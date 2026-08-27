@@ -27,9 +27,9 @@ async function updateClock() {
     if (tzLabel && data.timezone) tzLabel.textContent = data.timezone;
   } catch {
     const now = new Date();
-    // Fallback: calcula SP localmente
+    // Fallback: compute the time locally
     const sp = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    document.getElementById('clockTime').textContent = sp.toLocaleTimeString('pt-BR', {
+    document.getElementById('clockTime').textContent = sp.toLocaleTimeString('en-GB', {
       hour: '2-digit', minute: '2-digit', second: '2-digit'
     });
   }
@@ -53,7 +53,7 @@ targetTimeInput.addEventListener('input', (e) => {
       timePreview.textContent = `${val.slice(0, 2)}:${val.slice(2, 4)}`;
       timePreview.style.color = 'var(--text-accent)';
     } else {
-      timePreview.textContent = 'inválido';
+      timePreview.textContent = 'invalid';
       timePreview.style.color = 'var(--error)';
     }
   } else {
@@ -72,15 +72,15 @@ function addSession(type) {
   div.className = 'session-item';
   div.id = id;
 
-  // ponytail: prompt textarea por sessão, ambos os tipos
-  const promptField = `<textarea class="session-prompt" data-field="prompt" rows="3" placeholder="Prompt desta sessão..." style="width:100%;margin-top:8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:'Inter',sans-serif;font-size:0.85rem;resize:vertical;"></textarea>`;
+  // ponytail: one prompt textarea per session, both types
+  const promptField = `<textarea class="session-prompt" data-field="prompt" rows="3" placeholder="Prompt for this session..." style="width:100%;margin-top:8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:'Inter',sans-serif;font-size:0.85rem;resize:vertical;"></textarea>`;
 
   if (type === 'new') {
     div.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;width:100%">
-        <span class="session-badge new">NOVA</span>
+        <span class="session-badge new">NEW</span>
         <div class="session-input" style="flex:1">
-          <input type="text" placeholder="Label (ex: refactor-api)" value="Session-${sessionCounter}" data-type="new" data-field="label">
+          <input type="text" placeholder="Label (e.g. refactor-api)" value="Session-${sessionCounter}" data-type="new" data-field="label">
         </div>
         <button type="button" class="session-remove" onclick="removeSession('${id}')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
@@ -94,12 +94,12 @@ function addSession(type) {
   } else {
     div.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;width:100%">
-        <span class="session-badge existing">EXISTENTE</span>
+        <span class="session-badge existing">EXISTING</span>
         <div class="session-input" style="display:flex;gap:6px;align-items:center;flex:1">
           <select data-type="existing" data-field="pid" style="flex:1;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:'Inter',sans-serif;font-size:0.85rem;">
-            <option value="">Carregando janelas...</option>
+            <option value="">Loading windows...</option>
           </select>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="refreshWindowList('${id}')" title="Atualizar lista" style="padding:6px;min-width:auto;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="refreshWindowList('${id}')" title="Refresh list" style="padding:6px;min-width:auto;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
               <polyline points="23 4 23 10 17 10"/>
               <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
@@ -115,7 +115,7 @@ function addSession(type) {
       </div>
       ${promptField}
     `;
-    // Carrega janelas no select
+    // Load windows into the select
     populateWindowSelect(div.querySelector('select'));
   }
 
@@ -134,10 +134,10 @@ async function populateWindowSelect(select) {
   const windows = await loadWindows();
   select.innerHTML = '';
   if (windows.length === 0) {
-    select.innerHTML = '<option value="">Nenhuma janela encontrada</option>';
+    select.innerHTML = '<option value="">No windows found</option>';
     return;
   }
-  select.innerHTML = '<option value="">Selecione uma janela...</option>';
+  select.innerHTML = '<option value="">Select a window...</option>';
   windows.forEach(w => {
     const label = `[${w.name}] ${w.title}`.substring(0, 80);
     const opt = document.createElement('option');
@@ -152,10 +152,10 @@ async function refreshWindowList(sessionId) {
   if (!container) return;
   const select = container.querySelector('select');
   if (!select) return;
-  select.innerHTML = '<option value="">Atualizando...</option>';
-  cachedWindows = []; // força refresh
+  select.innerHTML = '<option value="">Refreshing...</option>';
+  cachedWindows = []; // force refresh
   await populateWindowSelect(select);
-  showToast(`${cachedWindows.length} janelas detectadas`, 'info');
+  showToast(`${cachedWindows.length} windows detected`, 'info');
 }
 
 window.refreshWindowList = refreshWindowList;
@@ -166,7 +166,7 @@ window.removeSession = removeSession;
 document.getElementById('addNewSession').addEventListener('click', () => addSession('new'));
 document.getElementById('addExistingSession').addEventListener('click', () => addSession('existing'));
 
-// Adiciona uma sessão nova por padrão
+// Add one new session by default
 addSession('new');
 
 // ---- Collect Sessions ----
@@ -202,26 +202,26 @@ form.addEventListener('submit', async (e) => {
   const time = targetTimeInput.value.trim();
   const sessions = collectSessions();
 
-  // Validação
+  // Validation
   if (time.length !== 4) {
-    showToast('Formato de horário inválido', 'error');
+    showToast('Invalid time format', 'error');
     return;
   }
 
   const h = parseInt(time.slice(0, 2), 10);
   const m = parseInt(time.slice(2, 4), 10);
   if (h < 0 || h > 23 || m < 0 || m > 59) {
-    showToast('Horário inválido', 'error');
+    showToast('Invalid time', 'error');
     return;
   }
 
   if (sessions.length === 0) {
-    showToast('Adicione pelo menos 1 sessão', 'error');
+    showToast('Add at least 1 session', 'error');
     return;
   }
 
   if (sessions.some(s => !s.prompt)) {
-    showToast('Cada sessão precisa de um prompt', 'error');
+    showToast('Each session needs a prompt', 'error');
     return;
   }
 
@@ -232,7 +232,7 @@ form.addEventListener('submit', async (e) => {
       <circle cx="12" cy="12" r="10"/>
       <polyline points="12 6 12 12 16 14"/>
     </svg>
-    Agendando...
+    Scheduling...
   `;
 
   try {
@@ -245,15 +245,15 @@ form.addEventListener('submit', async (e) => {
     const data = await res.json();
 
     if (res.ok) {
-      showToast(`Agendado para ${data.targetTime} (${data.diffMinutes} min)`, 'success');
+      showToast(`Scheduled for ${data.targetTime} (${data.diffMinutes} min)`, 'success');
       form.reset();
       timePreview.textContent = '--:--';
       loadSchedules();
     } else {
-      showToast(data.error || 'Erro ao agendar', 'error');
+      showToast(data.error || 'Failed to schedule', 'error');
     }
   } catch (err) {
-    showToast('Erro de conexão com servidor', 'error');
+    showToast('Server connection error', 'error');
   }
 
   submitBtn.disabled = false;
@@ -262,7 +262,7 @@ form.addEventListener('submit', async (e) => {
       <circle cx="12" cy="12" r="10"/>
       <polyline points="12 6 12 12 16 14"/>
     </svg>
-    Agendar
+    Schedule
   `;
 });
 
@@ -281,8 +281,8 @@ async function loadSchedules() {
             <circle cx="12" cy="12" r="10"/>
             <polyline points="12 6 12 12 16 14"/>
           </svg>
-          <p>Nenhum agendamento ativo</p>
-          <small>Crie um agendamento acima</small>
+          <p>No active schedules</p>
+          <small>Create one above</small>
         </div>
       `;
       return;
@@ -292,9 +292,9 @@ async function loadSchedules() {
       const timeFormatted = `${s.time.slice(0, 2)}:${s.time.slice(2, 4)}`;
       const statusClass = s.status;
       const statusLabel = {
-        waiting: '⏳ Aguardando',
-        executed: '✅ Executado',
-        cancelled: '❌ Cancelado'
+        waiting: '⏳ Waiting',
+        executed: '✅ Executed',
+        cancelled: '❌ Cancelled'
       }[s.status] || s.status;
 
       return `
@@ -305,11 +305,11 @@ async function loadSchedules() {
               <span class="status-badge ${statusClass} ${s.status === 'waiting' ? 'pulse' : ''}">${statusLabel}</span>
             </div>
             ${s.status === 'waiting' ? `
-              <button class="btn btn-danger" onclick="cancelSchedule(${s.id})">Cancelar</button>
+              <button class="btn btn-danger" onclick="cancelSchedule(${s.id})">Cancel</button>
             ` : ''}
           </div>
           <div class="schedule-meta">
-            <span>🖥️ ${s.sessions} sessão(ões)</span>
+            <span>🖥️ ${s.sessions} session(s)</span>
             <span>⏱️ ${s.diffMinutes} min</span>
             <span>#${s.id}</span>
           </div>
@@ -320,8 +320,8 @@ async function loadSchedules() {
   } catch (err) {
     container.innerHTML = `
       <div class="empty-state">
-        <p style="color: var(--error)">Erro ao carregar agendamentos</p>
-        <small>Verifique se o servidor está rodando</small>
+        <p style="color: var(--error)">Failed to load schedules</p>
+        <small>Check that the server is running</small>
       </div>
     `;
   }
@@ -332,11 +332,11 @@ async function cancelSchedule(id) {
   try {
     const res = await fetch(`${API}/api/schedule/${id}`, { method: 'DELETE' });
     if (res.ok) {
-      showToast(`Agendamento #${id} cancelado`, 'info');
+      showToast(`Schedule #${id} cancelled`, 'info');
       loadSchedules();
     }
   } catch {
-    showToast('Erro ao cancelar', 'error');
+    showToast('Failed to cancel', 'error');
   }
 }
 
@@ -380,5 +380,5 @@ document.getElementById('refreshBtn').addEventListener('click', loadSchedules);
 // ---- Init ----
 loadSchedules();
 
-// Auto-refresh a cada 30s
+// Auto-refresh every 30s
 setInterval(loadSchedules, 30000);

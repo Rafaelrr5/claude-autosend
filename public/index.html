@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>claude-autosend</title>
-  <meta name="description" content="Agende prompts automáticos para Claude Code CLI">
+  <meta name="description" content="Schedule automated prompts for Claude Code CLI">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
@@ -24,7 +24,7 @@
           </div>
           <div>
             <h1>claude-autosend</h1>
-            <p class="subtitle">Automação de prompts · <span id="tzLabel">…</span></p>
+            <p class="subtitle">Prompt automation · <span id="tzLabel">…</span></p>
           </div>
         </div>
         <div class="clock" id="clock">
@@ -46,7 +46,7 @@
               <line x1="8" y1="2" x2="8" y2="6"/>
               <line x1="3" y1="10" x2="21" y2="10"/>
             </svg>
-            Novo Agendamento
+            New Schedule
           </h2>
         </div>
 
@@ -58,13 +58,13 @@
                 <circle cx="12" cy="12" r="10"/>
                 <polyline points="12 6 12 12 16 14"/>
               </svg>
-              Horário de disparo (São Paulo)
+              Trigger time
             </label>
             <div class="time-input-wrapper">
               <input type="text" id="targetTime" placeholder="1230" maxlength="4" pattern="\d{4}" required>
               <span class="time-preview" id="timePreview">--:--</span>
             </div>
-            <small class="hint">Formato 24h: 0000 = meia-noite, 1430 = 14:30</small>
+            <small class="hint">24h format: 0000 = midnight, 1430 = 14:30</small>
           </div>
 
           <!-- Sessions -->
@@ -75,10 +75,10 @@
                 <line x1="8" y1="21" x2="16" y2="21"/>
                 <line x1="12" y1="17" x2="12" y2="21"/>
               </svg>
-              Sessões
+              Sessions
             </label>
             <div id="sessionsContainer">
-              <!-- Sessões serão adicionadas aqui -->
+              <!-- Sessions get added here -->
             </div>
             <div class="session-actions">
               <button type="button" class="btn btn-outline btn-sm" id="addNewSession">
@@ -86,7 +86,7 @@
                   <line x1="12" y1="5" x2="12" y2="19"/>
                   <line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
-                Nova sessão Claude
+                New Claude session
               </button>
               <button type="button" class="btn btn-outline btn-sm btn-secondary" id="addExistingSession">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
@@ -94,7 +94,7 @@
                   <polyline points="10 17 15 12 10 7"/>
                   <line x1="15" y1="12" x2="3" y2="12"/>
                 </svg>
-                Janela existente
+                Existing window
               </button>
             </div>
           </div>
@@ -105,7 +105,7 @@
               <circle cx="12" cy="12" r="10"/>
               <polyline points="12 6 12 12 16 14"/>
             </svg>
-            Agendar
+            Schedule
           </button>
         </form>
       </section>
@@ -120,7 +120,7 @@
               <line x1="16" y1="13" x2="8" y2="13"/>
               <line x1="16" y1="17" x2="8" y2="17"/>
             </svg>
-            Agendamentos
+            Schedules
           </h2>
           <button class="btn btn-ghost btn-sm" id="refreshBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
@@ -135,8 +135,8 @@
               <circle cx="12" cy="12" r="10"/>
               <polyline points="12 6 12 12 16 14"/>
             </svg>
-            <p>Nenhum agendamento ativo</p>
-            <small>Crie um agendamento acima</small>
+            <p>No active schedules</p>
+            <small>Create one above</small>
           </div>
         </div>
       </section>
