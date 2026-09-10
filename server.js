@@ -184,8 +184,16 @@ function restore() {
   if (!Array.isArray(rows)) return;
 
   for (const s of rows) {
-    if (s.status !== 'waiting') continue; // executed / cancelled / missed are history
     scheduleIdCounter = Math.max(scheduleIdCounter, s.id);
+    schedules.set(s.id, s);
+    if (s.status === 'running' || s.status === 'delivering') {
+      // Delivery is not transactional: even an absent result can mean sent.
+      // Include the old in-memory status, which another persist may have saved.
+      s.status = 'interrupted';
+      s.interruptedAt = new Date().toISOString();
+      s.deliveryWarning = 'Delivery was interrupted. Some or all prompts may have been sent. Check the target sessions before scheduling again; no automatic retry was made.';
+    }
+    if (s.status !== 'waiting') continue; // preserve history without re-arming it
     const remainingMs = Date.parse(s.scheduledAt) - Date.now();
 
     // A pending job whose time passed while the server was down is marked
@@ -335,6 +343,15 @@ async function fire(id, delivery = { openNewClaudeSession, sendToExistingWindow 
   clearTimeout(schedule.timeoutId);
   // Lock against duplicate firing/cancellation while asynchronous delivery runs.
   schedule.status = 'running';
+  schedule.startedAt = new Date().toISOString();
+  try {
+    persist(); // No delivery side effect is allowed before this write succeeds.
+  } catch (err) {
+    schedule.status = 'failed';
+    schedule.deliveryWarning = 'Unable to save the running state. No prompts were sent.';
+    console.error(`Schedule #${id} aborted before delivery:`, err.message);
+    return;
+  }
   console.log(`Schedule #${id} fired`);
 
   const results = [];
@@ -446,6 +463,9 @@ app.get('/api/schedules', (req, res) => {
       attachments,
       diffMinutes: s.diffMinutes,
       createdAt: s.createdAt,
+      startedAt: s.startedAt || null,
+      interruptedAt: s.interruptedAt || null,
+      deliveryWarning: s.deliveryWarning || null,
       executedAt: s.executedAt || null,
       results: s.results || null
     });

@@ -62,6 +62,21 @@ function setup() {
 
 const plain = value => JSON.parse(JSON.stringify(value));
 
+test('interrupted schedules show the delivery uncertainty warning without retry or cancel', async () => {
+  const app = setup();
+  app.context.fetch = async () => ({ json: async () => [{
+    id: 12, time: '0400', status: 'interrupted', sessions: 2, prompt: 'Read',
+    deliveryWarning: 'Some prompts may have been sent. Check <target> before scheduling again.'
+  }] });
+  await app.context.loadSchedules();
+  const html = app.elements.schedulesList.innerHTML;
+  assert.match(html, /Interrupted/);
+  assert.match(html, /may have been sent/);
+  assert.match(html, /&lt;target&gt;/);
+  assert.match(html, /role="alert"/);
+  assert.doesNotMatch(html, /cancelSchedule|<target>/);
+});
+
 test('attachment delivery and cancellation errors are visible and HTML escaped', async () => {
   const app = setup();
   const schedule = { id: 1, time: '1230', status: 'executed', sessions: 1, prompt: 'Read', results: [{ status: 'error', error: 'Attachment unavailable: <img src=x>.txt' }] };

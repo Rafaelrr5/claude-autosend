@@ -391,6 +391,7 @@ async function loadSchedules() {
       const statusLabel = {
         waiting: '⏳ Waiting',
         running: '⏳ Running',
+        interrupted: '⚠️ Interrupted',
         executed: '✅ Executed',
         cancelled: '❌ Cancelled'
       }[s.status] || s.status;
@@ -413,6 +414,7 @@ async function loadSchedules() {
             <span>#${s.id}</span>
           </div>
           <div class="schedule-prompt">${escapeHtml(s.prompt)}</div>
+          ${s.deliveryWarning ? `<div class="schedule-prompt" role="alert">${escapeHtml(s.deliveryWarning)}</div>` : ''}
           ${(s.attachments || []).length ? `<ul class="attachment-list schedule-attachments">${s.attachments.map(file => `<li>${escapeHtml(file.name)} (${escapeHtml(formatFileSize(file.size))})</li>`).join('')}</ul>` : ''}
           ${(s.results || []).filter(result => result.status === 'error').map(result => `<div class="schedule-prompt" role="alert">${escapeHtml(result.error || 'Delivery failed')}</div>`).join('')}
         </div>
