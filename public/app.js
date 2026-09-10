@@ -5,6 +5,7 @@
 const API = '';
 let sessionCounter = 0;
 let cachedWindows = [];
+let submitting = false;
 
 // ---- Load Windows ----
 async function loadWindows() {
@@ -66,14 +67,21 @@ targetTimeInput.addEventListener('input', (e) => {
 const sessionsContainer = document.getElementById('sessionsContainer');
 
 function addSession(type) {
+  if (submitting) return;
   sessionCounter++;
   const id = `session-${sessionCounter}`;
   const div = document.createElement('div');
   div.className = 'session-item';
   div.id = id;
+  div.attachmentFiles = [];
 
   // ponytail: one prompt textarea per session, both types
-  const promptField = `<textarea class="session-prompt" data-field="prompt" rows="3" placeholder="Prompt for this session..." style="width:100%;margin-top:8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:'Inter',sans-serif;font-size:0.85rem;resize:vertical;"></textarea>`;
+  const promptField = `<textarea class="session-prompt" data-field="prompt" rows="3" required aria-label="Session prompt" placeholder="Prompt for this session..." style="width:100%;margin-top:8px;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:'Inter',sans-serif;font-size:0.85rem;resize:vertical;"></textarea>
+    <div class="session-attachments">
+      <label for="${id}-files">Attachments (optional)</label>
+      <input type="file" id="${id}-files" class="attachment-picker" multiple aria-describedby="attachmentLimits">
+      <ul class="attachment-list" aria-live="polite"></ul>
+    </div>`;
 
   if (type === 'new') {
     div.innerHTML = `
@@ -120,18 +128,54 @@ function addSession(type) {
   }
 
   sessionsContainer.appendChild(div);
+  const picker = div.querySelector('input[type="file"]');
+  picker.addEventListener('change', () => {
+    if (submitting) return;
+    div.attachmentFiles.push(...Array.from(picker.files));
+    picker.value = ''; // Allow selecting the same file again after removing it.
+    renderAttachments(div);
+  });
+}
+
+function formatFileSize(size) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function renderAttachments(item) {
+  const list = item.querySelector('.attachment-list');
+  list.innerHTML = '';
+  item.attachmentFiles.forEach((file, index) => {
+    const row = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = `${file.name} (${formatFileSize(file.size)})`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn btn-danger attachment-remove';
+    remove.textContent = 'Remove';
+    remove.setAttribute('aria-label', `Remove ${file.name}`);
+    remove.disabled = submitting;
+    remove.addEventListener('click', () => {
+      if (submitting) return;
+      item.attachmentFiles.splice(index, 1);
+      renderAttachments(item);
+    });
+    row.appendChild(label);
+    row.appendChild(remove);
+    list.appendChild(row);
+  });
 }
 
 function removeSession(id) {
+  if (submitting) return;
   const el = document.getElementById(id);
-  if (el) {
-    el.style.animation = 'toastOut 0.2s ease-out forwards';
-    setTimeout(() => el.remove(), 200);
-  }
+  if (el) el.remove();
 }
 
 async function populateWindowSelect(select) {
   const windows = await loadWindows();
+  if (submitting) return;
   select.innerHTML = '';
   if (windows.length === 0) {
     select.innerHTML = '<option value="">No windows found</option>';
@@ -148,6 +192,7 @@ async function populateWindowSelect(select) {
 }
 
 async function refreshWindowList(sessionId) {
+  if (submitting) return;
   const container = document.getElementById(sessionId);
   if (!container) return;
   const select = container.querySelector('select');
@@ -175,17 +220,18 @@ function collectSessions() {
   const sessions = [];
 
   items.forEach(item => {
-    const input = item.querySelector('input');
+    const input = item.querySelector('input[data-field="label"]');
     const select = item.querySelector('select');
     const prompt = item.querySelector('.session-prompt')?.value.trim() || '';
+    const files = [...(item.attachmentFiles || [])];
 
     if (input && input.dataset.type === 'new') {
-      sessions.push({ type: 'new', label: input.value.trim() || `Session-${Date.now()}`, prompt });
+      sessions.push({ type: 'new', label: input.value.trim() || `Session-${Date.now()}`, prompt, files });
     } else if (select && select.dataset.type === 'existing') {
       const pid = parseInt(select.value, 10);
       if (pid) {
         const selectedText = select.options[select.selectedIndex]?.textContent || '';
-        sessions.push({ type: 'existing', pid, label: selectedText, prompt });
+        sessions.push({ type: 'existing', pid, label: selectedText, prompt, files });
       }
     }
   });
@@ -193,17 +239,55 @@ function collectSessions() {
   return sessions;
 }
 
+function readAttachment(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, data: reader.result.slice(reader.result.indexOf(',') + 1) });
+    reader.onerror = reader.onabort = () => reject(new Error(`Could not read "${file.name}". Please select it again.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function encodeSessions(sessions) {
+  let total = 0;
+  for (const [index, session] of sessions.entries()) {
+    if (session.files.length > 10) throw new Error(`Session ${index + 1}: maximum 10 files per session. Remove some attachments.`);
+    for (const file of session.files) {
+      if (file.size > 5 * 1024 * 1024) throw new Error(`"${file.name}" exceeds the 5 MiB per-file limit.`);
+      total += file.size;
+    }
+  }
+  if (total > 20 * 1024 * 1024) throw new Error('Attachments exceed the 20 MiB total per schedule. Remove some files.');
+  return Promise.all(sessions.map(async ({ files, ...session }) => {
+    if (files.length) session.attachments = await Promise.all(files.map(readAttachment));
+    return session;
+  }));
+}
+
 // ---- Form Submit ----
 const form = document.getElementById('scheduleForm');
 
+form.addEventListener('reset', (e) => {
+  if (submitting) {
+    e.preventDefault();
+    return;
+  }
+  sessionsContainer.querySelectorAll('.session-item').forEach(item => {
+    item.attachmentFiles = [];
+    renderAttachments(item);
+  });
+  timePreview.textContent = '--:--';
+});
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (submitting) return;
 
   const time = targetTimeInput.value.trim();
   const sessions = collectSessions();
 
   // Validation
-  if (time.length !== 4) {
+  if (!/^\d{4}$/.test(time)) {
     showToast('Invalid time format', 'error');
     return;
   }
@@ -220,13 +304,22 @@ form.addEventListener('submit', async (e) => {
     return;
   }
 
+  if (sessions.length !== sessionsContainer.querySelectorAll('.session-item').length) {
+    showToast('Select a window for each existing session, or remove the session.', 'error');
+    return;
+  }
+
   if (sessions.some(s => !s.prompt)) {
     showToast('Each session needs a prompt', 'error');
     return;
   }
 
   const submitBtn = document.getElementById('submitBtn');
-  submitBtn.disabled = true;
+  const controls = Array.from(form.querySelectorAll('input, textarea, select, button'));
+  const disabledStates = controls.map(control => control.disabled);
+  submitting = true;
+  controls.forEach(control => { control.disabled = true; });
+  form.setAttribute('aria-busy', 'true');
   submitBtn.innerHTML = `
     <svg class="pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
       <circle cx="12" cy="12" r="10"/>
@@ -236,16 +329,18 @@ form.addEventListener('submit', async (e) => {
   `;
 
   try {
+    const payload = await encodeSessions(sessions);
     const res = await fetch(`${API}/api/schedule`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ time, sessions })
+      body: JSON.stringify({ time, sessions: payload })
     });
 
     const data = await res.json();
 
     if (res.ok) {
       showToast(`Scheduled for ${data.targetTime} (${data.diffMinutes} min)`, 'success');
+      submitting = false;
       form.reset();
       timePreview.textContent = '--:--';
       loadSchedules();
@@ -253,17 +348,19 @@ form.addEventListener('submit', async (e) => {
       showToast(data.error || 'Failed to schedule', 'error');
     }
   } catch (err) {
-    showToast('Server connection error', 'error');
-  }
-
-  submitBtn.disabled = false;
-  submitBtn.innerHTML = `
+    showToast(err.message || 'Server connection error', 'error');
+  } finally {
+    submitting = false;
+    controls.forEach((control, index) => { control.disabled = disabledStates[index]; });
+    form.setAttribute('aria-busy', 'false');
+    submitBtn.innerHTML = `
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
       <circle cx="12" cy="12" r="10"/>
       <polyline points="12 6 12 12 16 14"/>
     </svg>
     Schedule
   `;
+  }
 });
 
 // ---- Load Schedules ----
@@ -293,6 +390,7 @@ async function loadSchedules() {
       const statusClass = s.status;
       const statusLabel = {
         waiting: '⏳ Waiting',
+        running: '⏳ Running',
         executed: '✅ Executed',
         cancelled: '❌ Cancelled'
       }[s.status] || s.status;
@@ -310,10 +408,13 @@ async function loadSchedules() {
           </div>
           <div class="schedule-meta">
             <span>🖥️ ${s.sessions} session(s)</span>
+            ${s.attachmentCount ? `<span>📎 ${escapeHtml(s.attachmentCount)} attachment(s)</span>` : ''}
             <span>⏱️ ${s.diffMinutes} min</span>
             <span>#${s.id}</span>
           </div>
           <div class="schedule-prompt">${escapeHtml(s.prompt)}</div>
+          ${(s.attachments || []).length ? `<ul class="attachment-list schedule-attachments">${s.attachments.map(file => `<li>${escapeHtml(file.name)} (${escapeHtml(formatFileSize(file.size))})</li>`).join('')}</ul>` : ''}
+          ${(s.results || []).filter(result => result.status === 'error').map(result => `<div class="schedule-prompt" role="alert">${escapeHtml(result.error || 'Delivery failed')}</div>`).join('')}
         </div>
       `;
     }).join('');
@@ -333,6 +434,10 @@ async function cancelSchedule(id) {
     const res = await fetch(`${API}/api/schedule/${id}`, { method: 'DELETE' });
     if (res.ok) {
       showToast(`Schedule #${id} cancelled`, 'info');
+      loadSchedules();
+    } else {
+      const data = await res.json();
+      showToast(data.error || 'Failed to cancel', 'error');
       loadSchedules();
     }
   } catch {
@@ -356,7 +461,7 @@ function showToast(message, type = 'info') {
 
   toast.innerHTML = `
     <span>${icons[type] || 'ℹ️'}</span>
-    <span class="toast-text">${message}</span>
+    <span class="toast-text">${escapeHtml(message)}</span>
   `;
 
   container.appendChild(toast);

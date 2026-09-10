@@ -349,6 +349,7 @@ textarea {
 
 .session-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
@@ -433,6 +434,51 @@ textarea {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+.session-attachments {
+  width: 100%;
+  min-width: 0;
+}
+
+.attachment-picker {
+  width: 100%;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+}
+
+.attachment-picker::file-selector-button {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--text-primary);
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+.attachment-list {
+  list-style: none;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.attachment-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.attachment-list li span { min-width: 0; }
+.attachment-remove { flex-shrink: 0; }
+.attachment-limits { margin-bottom: 12px; color: var(--text-secondary); }
+#scheduleForm :disabled { opacity: 0.55; cursor: not-allowed; }
+.schedule-meta { flex-wrap: wrap; }
+.toast-text { overflow-wrap: anywhere; }
 
 /* ============================================
    Buttons

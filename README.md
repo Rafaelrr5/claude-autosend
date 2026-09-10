@@ -68,7 +68,7 @@ Read [SECURITY.md](SECURITY.md) before you do. This is deliberately opt-in.
 
 1. Enter the target time as four digits, `HHMM` (e.g. `0400`).
 2. Add one or more sessions — **New Claude session** for a fresh terminal, **Existing window** to pick a live one.
-3. Write a prompt for each session.
+3. Write a prompt for each session. Optionally select files under **Attachments**; select again to add more, or **Remove** individual files.
 4. Press **Schedule**. It shows up below with a live countdown and a cancel button.
 
 If the time has already passed today, it is scheduled for tomorrow.
@@ -85,7 +85,28 @@ The UI is a thin client over a small JSON API.
 | `GET` | `/api/windows` | List visible windows with PIDs |
 | `GET` | `/api/time` | Current time in the configured timezone |
 
-Session object: `{ type: "new" \| "existing", prompt: string, label?: string, pid?: number }`
+Session object: `{ type: "new" | "existing", prompt: string, label?: string, pid?: number }`
+
+Optional session field: `attachments: [{ name: "notes.txt", data: "aGVsbG8=" }]`.
+`data` is canonical base64 of the file bytes, without a data-URL prefix. Client paths
+are never used for storage. The list endpoint returns `attachmentCount` and
+`attachments: [{ name, size }]` metadata, not file contents.
+
+### Attachments
+
+- Up to **10 files per session**, **5 MiB per file**, **20 MiB per schedule**. The JSON request limit is 32 MiB to allow base64 overhead.
+- Files are copied at scheduling time into generated subdirectories of `DATA_FILE + ".attachments"` (default: `schedules.json.attachments/`), outside the public web directory. Changes to the originals do not alter scheduled copies; pending copies survive a server restart.
+- Both delivery modes append absolute paths and a request to read the attached files. Binary bytes are not pasted as text. New sessions receive the attachment directory through `--add-dir`; existing sessions may ask permission to read files outside their workspace. Normal Claude Code permissions remain in effect. Whether a format can be interpreted depends on Claude Code and the tools available to it.
+- Failed scheduling keeps your selections. Successful scheduling clears them. Missing/unreadable copies block dispatch and appear as delivery errors.
+- Cancelling a waiting schedule removes its copies. Files from delivered, failed, or missed schedules remain available because Claude can read them asynchronously. **There is no automatic retention limit:** remove the corresponding generated directory manually only after the relevant sessions are finished. Never remove copies belonging to waiting schedules.
+- The default attachment directory is gitignored. If using a custom `DATA_FILE`, keep both that file and its attachment directory outside version control and outside `public/`.
+
+### Verification
+
+`npm test` covers the HTTP API, exact uploaded bytes, persistence/restart, both
+delivery branches (Windows calls stubbed), validation, cleanup and frontend
+selection/submission behavior. `npm run check` checks JavaScript syntax. Tests
+use temporary storage and do not launch Claude sessions.
 
 ## Known limitations
 

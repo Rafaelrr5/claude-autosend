@@ -3,6 +3,7 @@ node_modules/
 .env.local
 schedules.json
 schedules.json.*.tmp
+*.json.attachments/
 npm-debug.log*
 yarn-error.log*
 *.log

@@ -11,6 +11,8 @@ claude-autosend exists to run a coding agent on your machine without you sitting
 - **`--dangerously-skip-permissions` is opt-in.** `CLAUDE_FLAGS` is empty by default, so Claude Code's approval prompts stay on until you deliberately disable them.
 - **Prompts travel by temp file, not by command line.** They are written to the OS temp directory, read into a PowerShell variable, and deleted after use. This avoids shell-escaping bugs and keeps prompt text out of process arguments.
 - **Every interpolated value is quoted as a PowerShell literal.** PID input is parsed as an integer before it reaches a script.
+- **Attachments use generated disk filenames outside `public/`.** Names, base64, file counts and byte limits are validated before writing; supplied client paths are ignored. Attachment-root symlinks/junctions are rejected. These are ordinary local files, not encrypted storage: Windows account ACLs remain the security boundary.
+- **Attachment copies are retained after dispatch.** Cancel pending schedules to remove their copies; manually remove retained directories only after consumers finish. Do not commit attachments or expose their storage directory through a web server. Untrusted files remain untrusted input to the coding agent; the appended reference-data instruction is not a security sandbox.
 
 ### What you are accepting when you run it
 
