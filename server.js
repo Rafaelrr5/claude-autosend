@@ -290,9 +290,12 @@ async function sendToExistingWindow(pid, prompt) {
 $wshell = New-Object -ComObject WScript.Shell
 $proc = Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue
 if ($proc -and $proc.MainWindowHandle -ne 0) {
+  # A failed activation leaves a different window focused: do not touch it.
+  if (-not $wshell.AppActivate($proc.Id)) {
+    throw "Unable to activate window for PID ${numericPid}"
+  }
   $promptText = [System.IO.File]::ReadAllText(${psq(tmpFile)})
   Set-Clipboard -Value $promptText
-  [void]$wshell.AppActivate($proc.Id)
   Start-Sleep -Milliseconds 800
   $wshell.SendKeys("^v")
   Start-Sleep -Milliseconds 500

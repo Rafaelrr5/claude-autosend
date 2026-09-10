@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const { execFile } = require('node:child_process');
 
 // Point persistence at a throwaway file before server.js reads DATA_FILE.
@@ -234,3 +235,79 @@ test('restore preserves completed ID 9 and allocates the next API schedule above
   assert.ok(created.id > 9, `next ID ${created.id} must exceed restored ID 9`);
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')).find(s => s.id === 9), completed);
 });
+
+// Execute the actual generated PowerShell, but replace every desktop boundary.
+// No real process lookup, COM object, clipboard operation or keystroke is allowed.
+async function windowDelivery(t, scenario) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autosend-window-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const eventsFile = path.join(root, 'events.txt');
+  const scriptFile = path.join(root, 'delivery.ps1');
+  const promptFiles = [];
+  const module = { exports: {} };
+  const source = path.join(__dirname, '../server.js');
+  vm.runInNewContext(fs.readFileSync(source, 'utf8'), {
+    module, __dirname: path.dirname(source), console, setTimeout, clearTimeout,
+    process: { env: { DATA_FILE: path.join(root, 'schedules.json') }, cwd: () => root, pid: process.pid },
+    require: id => {
+      if (id === 'fs') return { ...fs, writeFileSync(file, ...args) {
+        if (path.basename(file).startsWith('claude_prompt_')) promptFiles.push(file);
+        return fs.writeFileSync(file, ...args);
+      } };
+      if (id !== 'child_process') return require(id);
+      return { exec(script, options, callback) {
+        assert.equal(options.shell, 'powershell.exe');
+        assert.equal(options.windowsHide, true);
+        fs.writeFileSync(scriptFile, `
+$scenario = ${psq(scenario)}
+function Record([string]$value) { [IO.File]::AppendAllText(${psq(eventsFile)}, $value + [Environment]::NewLine) }
+function New-Object {
+  param([string]$ComObject)
+  if ($ComObject -ne 'WScript.Shell') { throw 'Unexpected COM object' }
+  $shell = [PSCustomObject]@{}
+  $shell | Add-Member ScriptMethod AppActivate {
+    param($targetId)
+    Record "activate:$targetId"
+    if ($scenario -eq 'activation-error') { throw 'Activation exception' }
+    return ($scenario -ne 'activation-false')
+  }
+  $shell | Add-Member ScriptMethod SendKeys { param($keys) Record "keys:$keys" }
+  return $shell
+}
+function Get-Process {
+  param($Id, $ErrorAction)
+  if ($scenario -eq 'missing') { return $null }
+  $handle = if ($scenario -eq 'no-window') { 0 } else { 1 }
+  return [PSCustomObject]@{ Id = $Id; MainWindowHandle = $handle; MainWindowTitle = 'Test window' }
+}
+function Set-Clipboard {
+  param($Value)
+  Record "clipboard:$Value"
+  if ($scenario -eq 'clipboard-error') { Write-Error 'Clipboard unavailable' }
+}
+function Start-Sleep { param($Milliseconds) }
+${script}`, 'utf8');
+        execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', scriptFile],
+          { windowsHide: true, timeout: 15000 }, callback);
+      } };
+    }
+  }, { filename: source });
+  const api = module.exports;
+  api.schedules.set(101, { id: 101, status: 'waiting', sessions: [
+    { type: 'existing', pid: 1234, prompt: 'test prompt', label: 'Target' }
+  ] });
+  await api.fire(101);
+  assert.equal(promptFiles.length, 1);
+  assert.ok(promptFiles.every(file => !fs.existsSync(file)), 'temporary prompt must be removed');
+  const events = fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, 'utf8').trim().split(/\r?\n/) : [];
+  const [saved] = JSON.parse(fs.readFileSync(path.join(root, 'schedules.json'), 'utf8'));
+  return { events, result: saved.results[0] };
+}
+
+test('AppActivate false aborts before clipboard/paste/Enter and persists a delivery error',
+  { skip: process.platform !== 'win32' }, async t => {
+    const { events, result } = await windowDelivery(t, 'activation-false');
+    assert.deepStrictEqual(events, ['activate:1234']);
+    assert.strictEqual(result.status, 'error');
+    assert.match(result.error, /activate.*1234/i);
+  });
