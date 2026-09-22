@@ -21,7 +21,7 @@ Two ways to deliver a prompt when the timer fires:
 | **New session** | Opens a fresh PowerShell window, `cd`s into your working directory, and launches `claude` with the prompt as a single argument. |
 | **Existing window** | Picks a running window by PID, copies the prompt to the clipboard, focuses the window, and sends `Ctrl+V` + `Enter`. |
 
-A schedule can mix both, so one trigger can fan out across several sessions.
+A schedule can mix both, so one trigger can fan out across several sessions. Existing windows are served first (a new session's window would steal focus), and schedules that fire at the same moment are delivered one after another, never interleaved.
 
 ## Requirements
 
@@ -51,6 +51,7 @@ All settings are environment variables — see [`.env.example`](.env.example).
 | `HOST` | `127.0.0.1` | Bind address. **Leave it on loopback.** |
 | `CLAUDE_WORKDIR` | current directory | Directory Claude Code is launched in |
 | `CLAUDE_FLAGS` | *(empty)* | Extra flags for the `claude` CLI |
+| `CLAUDE_BIN` | found on `PATH` | Full path to `claude.exe`, if it is not found automatically |
 | `TZ_NAME` | `America/Sao_Paulo` | IANA timezone for the scheduled time |
 | `DATA_FILE` | `schedules.json` | JSON file pending schedules are written to |
 
@@ -112,7 +113,8 @@ use temporary storage and do not launch Claude sessions.
 
 - **A job whose time passed while the server was down never fires.** Pending schedules survive a restart (they are written to `DATA_FILE` and re-armed on boot), but anything already overdue is marked `missed` rather than fired late.
 - **The machine must stay awake.** Sleep or hibernation stops the timer.
-- **`SendKeys` needs the desktop.** Existing-window delivery steals focus and fails on a locked workstation.
+- **`SendKeys` needs the desktop.** Existing-window delivery steals focus and fails on a locked workstation. If another window takes focus mid-delivery, the paste or the `Enter` is withheld and the session is reported as an error instead of typing into the wrong window.
+- **New-session prompts are limited to about 32,000 characters** (the Windows command-line limit). Longer prompts are reported as an error; put the bulk in an attachment.
 
 ## Contributing
 

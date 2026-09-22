@@ -220,10 +220,13 @@ test('both delivery modes receive explicit absolute file references, originals s
     sendToExistingWindow: async (...args) => { calls.push(['existing', ...args]); return { status: 'sent' }; }
   });
   assert.equal(calls.length, 3);
+  // Existing windows are delivered first, so look calls up by mode.
+  const [existing, withFiles, textOnly] = calls;
+  assert.deepEqual(calls.map(c => c[0]), ['existing', 'new', 'new']);
   const saved = rows()[0];
-  assert.equal(calls[0][3], saved.attachmentDir, 'new sessions receive the authorized attachment directory');
-  assert.equal(calls[2][3], undefined, 'text-only sessions get no additional directory');
-  for (const [i, prompt] of [[0, calls[0][1]], [1, calls[1][2]]]) {
+  assert.equal(withFiles[3], saved.attachmentDir, 'new sessions receive the authorized attachment directory');
+  assert.equal(textOnly[3], undefined, 'text-only sessions get no additional directory');
+  for (const [i, prompt] of [[0, withFiles[1]], [1, existing[2]]]) {
     assert.ok(prompt.startsWith(original));
     assert.match(prompt, /read.*files/i);
     assert.ok(prompt.includes(JSON.stringify(saved.sessions[i].attachments[0].path)));
@@ -231,7 +234,7 @@ test('both delivery modes receive explicit absolute file references, originals s
     assert.ok(fs.existsSync(saved.sessions[i].attachments[0].path));
     assert.equal(saved.sessions[i].prompt, original);
   }
-  assert.equal(calls[2][1], original);
+  assert.equal(textOnly[1], original);
 });
 
 test('missing attachment fails before either Windows delivery function is called', async () => {

@@ -33,6 +33,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Scheduled jobs live in memory and are mirrored to DATA_FILE on every change.
 const schedules = new Map();
 let scheduleIdCounter = 0;
+// Tail of the global delivery chain (see fire()).
+let deliveryQueue = Promise.resolve();
 
 // Decode the entire request before making any filesystem changes.
 function validateSessions(sessions) {
@@ -226,28 +228,72 @@ const psq = (s) => `'${String(s).replace(/'/g, "''")}'`;
 function runPowerShell(script) {
   return new Promise((resolve, reject) => {
     exec(script, { shell: 'powershell.exe', windowsHide: true }, (error, stdout, stderr) => {
-      if (error) return reject(new Error(stderr || error.message));
+      if (error) {
+        const detail = (stderr || error.message).trim();
+        if (detail) console.error(detail);
+        // The first line is the thrown message; the rest is PowerShell position noise.
+        return reject(new Error(detail.split(/\r?\n/)[0] || 'PowerShell failed'));
+      }
       resolve(stdout);
     });
   });
 }
 
+// Quote one argument by the Windows CommandLineToArgvW rules, which claude.exe
+// uses to rebuild argv. Windows PowerShell 5.1 does not do this correctly for
+// arguments containing double quotes (every attachment prompt has them), so
+// the command line is built here and handed over verbatim.
+const winArg = (s) => `"${String(s).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`;
+
+// Resolve the real claude.exe. The npm shims (claude.ps1 / claude.cmd) re-parse
+// the arguments and would mangle the prompt again, so they are never invoked.
+function findClaudeExe(env = process.env) {
+  if (env.CLAUDE_BIN) {
+    if (!/\.exe$/i.test(env.CLAUDE_BIN)) throw new Error('CLAUDE_BIN must point to claude.exe');
+    return env.CLAUDE_BIN;
+  }
+  for (const dir of (env.PATH || '').split(path.delimiter).filter(Boolean)) {
+    for (const candidate of [path.join(dir, 'claude.exe'),
+      path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')]) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  throw new Error('claude.exe not found on PATH; set CLAUDE_BIN to its full path');
+}
+
+// Windows rejects command lines longer than 32767 characters.
+const MAX_COMMAND_LINE = 32000;
+
+function claudeArgs(prompt, attachmentDir) {
+  // `--add-dir` takes several values: without `--` it swallows the prompt.
+  return [CLAUDE_FLAGS, attachmentDir ? `--add-dir ${winArg(attachmentDir)}` : '', '--', winArg(prompt)]
+    .filter(Boolean).join(' ');
+}
+
 // Open a new Claude Code session in a fresh PowerShell window.
-// The prompt travels via a temp file and is read into a variable, so the CLI
-// receives exactly one argument regardless of quoting or whitespace.
+// The argument line travels via a temp file and reaches claude.exe through
+// the stop-parsing token, so the prompt arrives as exactly one argument.
 async function openNewClaudeSession(prompt, sessionLabel, attachmentDir) {
-  const stamp = `${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-  const promptFile = path.join(os.tmpdir(), `claude_prompt_${stamp}.txt`);
+  const exe = findClaudeExe();
+  const args = claudeArgs(prompt, attachmentDir);
+  if (args.length + exe.length > MAX_COMMAND_LINE) {
+    throw new Error('Prompt is too long for a new session (Windows command-line limit is about 32,000 characters)');
+  }
+  const stamp = `${Date.now()}_${randomUUID()}`;
+  const argsFile = path.join(os.tmpdir(), `claude_args_${stamp}.txt`);
   const scriptFile = path.join(os.tmpdir(), `claude_run_${stamp}.ps1`);
 
-  fs.writeFileSync(promptFile, prompt, 'utf8');
-  fs.writeFileSync(scriptFile, `
-$prompt = [System.IO.File]::ReadAllText(${psq(promptFile)})
-Write-Host ${psq(`=== claude-autosend - ${sessionLabel} ===`)} -ForegroundColor Cyan
-Set-Location -Path ${psq(CLAUDE_WORKDIR)}
-claude ${CLAUDE_FLAGS}${attachmentDir ? ` --add-dir ${psq(attachmentDir)}` : ''} $prompt
-Remove-Item ${psq(promptFile)} -ErrorAction SilentlyContinue
+  fs.writeFileSync(argsFile, args, 'utf8');
+  // BOM: Windows PowerShell 5.1 reads BOM-less scripts as ANSI, which would
+  // corrupt non-ASCII labels and paths.
+  fs.writeFileSync(scriptFile, `\ufeff
+$env:CLAUDE_AUTOSEND_ARGS = [System.IO.File]::ReadAllText(${psq(argsFile)})
+Remove-Item ${psq(argsFile)} -ErrorAction SilentlyContinue
 Remove-Item ${psq(scriptFile)} -ErrorAction SilentlyContinue
+Write-Host ${psq(`=== claude-autosend - ${sessionLabel} ===`)} -ForegroundColor Cyan
+Set-Location -LiteralPath ${psq(CLAUDE_WORKDIR)}
+& ${psq(exe)} --% %CLAUDE_AUTOSEND_ARGS%
+Remove-Item Env:CLAUDE_AUTOSEND_ARGS -ErrorAction SilentlyContinue
 `, 'utf8');
 
   // -File takes a single path: no space-joining, no quote splitting.
@@ -287,6 +333,9 @@ async function sendToExistingWindow(pid, prompt) {
 
   try {
     const stdout = await runPowerShell(`
+if (-not ('AutoSend.Win32' -as [type])) {
+  Add-Type -Namespace AutoSend -Name Win32 -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'
+}
 $wshell = New-Object -ComObject WScript.Shell
 $proc = Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue
 if ($proc -and $proc.MainWindowHandle -ne 0) {
@@ -297,8 +346,16 @@ if ($proc -and $proc.MainWindowHandle -ne 0) {
   $promptText = [System.IO.File]::ReadAllText(${psq(tmpFile)})
   Set-Clipboard -Value $promptText
   Start-Sleep -Milliseconds 800
+  # Another window (e.g. a session opened by the same schedule) may have taken
+  # focus during the wait: keystrokes always go to the foreground window.
+  if ([AutoSend.Win32]::GetForegroundWindow() -ne $proc.MainWindowHandle) {
+    throw "Window for PID ${numericPid} lost focus before paste; nothing was sent"
+  }
   $wshell.SendKeys("^v")
   Start-Sleep -Milliseconds 500
+  if ([AutoSend.Win32]::GetForegroundWindow() -ne $proc.MainWindowHandle) {
+    throw "Window for PID ${numericPid} lost focus after paste; Enter was not sent"
+  }
   $wshell.SendKeys("{ENTER}")
   Write-Output "Sent to PID ${numericPid}: $($proc.MainWindowTitle)"
 } else {
@@ -364,22 +421,35 @@ async function fire(id, delivery = { openNewClaudeSession, sendToExistingWindow 
   } catch (err) {
     results.push({ status: 'error', error: err.message });
   }
-  for (const [index, session] of (prompts ? schedule.sessions : []).entries()) {
-    try {
-      if (session.type === 'new') {
-        results.push(await delivery.openNewClaudeSession(prompts[index], session.label || `Session-${id}`,
-          session.attachments?.length ? schedule.attachmentDir : undefined));
-      } else {
-        results.push(await delivery.sendToExistingWindow(session.pid, prompts[index]));
+  // Paste into existing windows first: every new session opens a window that
+  // grabs focus, and SendKeys always types into whatever window is in front.
+  const order = (prompts ? schedule.sessions : []).map((session, index) => index)
+    .sort((a, b) => (schedule.sessions[a].type === 'new') - (schedule.sessions[b].type === 'new'));
+  const delivered = [];
+  // Schedules set for the same minute fire in the same tick. The clipboard and
+  // keyboard focus are global, so only one schedule may deliver at a time.
+  const turn = deliveryQueue.then(async () => {
+    for (const index of order) {
+      const session = schedule.sessions[index];
+      try {
+        if (session.type === 'new') {
+          delivered[index] = await delivery.openNewClaudeSession(prompts[index], session.label || `Session-${id}`,
+            session.attachments?.length ? schedule.attachmentDir : undefined);
+        } else {
+          delivered[index] = await delivery.sendToExistingWindow(session.pid, prompts[index]);
+        }
+      } catch (err) {
+        delivered[index] = {
+          label: session.label || session.windowTitle,
+          status: 'error',
+          error: err.message
+        };
       }
-    } catch (err) {
-      results.push({
-        label: session.label || session.windowTitle,
-        status: 'error',
-        error: err.message
-      });
     }
-  }
+  });
+  deliveryQueue = turn.catch(() => {});
+  await turn;
+  results.push(...delivered);
 
   schedule.status = 'executed';
   schedule.results = results;
@@ -548,4 +618,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, fire, msUntilTarget, isValidTime, psq, persist, restore, schedules, DATA_FILE, ATTACHMENTS_DIR };
+module.exports = { app, fire, msUntilTarget, isValidTime, psq, persist, restore, schedules, DATA_FILE, ATTACHMENTS_DIR,
+  openNewClaudeSession };

@@ -278,8 +278,19 @@ function Get-Process {
   param($Id, $ErrorAction)
   if ($scenario -eq 'missing') { return $null }
   $handle = if ($scenario -eq 'no-window') { 0 } else { 1 }
-  return [PSCustomObject]@{ Id = $Id; MainWindowHandle = $handle; MainWindowTitle = 'Test window' }
+  return [PSCustomObject]@{ Id = $Id; MainWindowHandle = [IntPtr]$handle; MainWindowTitle = 'Test window' }
 }
+# Pre-define the foreground probe so the delivery script does not load the real one.
+Add-Type -Namespace AutoSend -Name Win32 -MemberDefinition @'
+public static int Calls;
+public static string Scenario;
+public static IntPtr GetForegroundWindow() {
+  Calls++;
+  if (Scenario == "focus-lost-before-paste" || (Scenario == "focus-lost-after-paste" && Calls > 1)) return new IntPtr(2);
+  return new IntPtr(1);
+}
+'@
+[AutoSend.Win32]::Scenario = $scenario
 function Set-Clipboard {
   param($Value)
   Record "clipboard:$Value"
@@ -311,3 +322,118 @@ test('AppActivate false aborts before clipboard/paste/Enter and persists a deliv
     assert.strictEqual(result.status, 'error');
     assert.match(result.error, /activate.*1234/i);
   });
+
+
+test('existing-window delivery pastes then presses Enter when focus holds',
+  { skip: process.platform !== 'win32' }, async t => {
+    const { events, result } = await windowDelivery(t, 'ok');
+    assert.deepStrictEqual(events, ['activate:1234', 'clipboard:test prompt', 'keys:^v', 'keys:{ENTER}']);
+    assert.strictEqual(result.status, 'sent');
+  });
+
+test('focus stolen before paste sends nothing; stolen after paste withholds Enter',
+  { skip: process.platform !== 'win32' }, async t => {
+    const before = await windowDelivery(t, 'focus-lost-before-paste');
+    assert.deepStrictEqual(before.events, ['activate:1234', 'clipboard:test prompt']);
+    assert.strictEqual(before.result.status, 'error');
+    assert.match(before.result.error, /lost focus before paste/);
+    assert.ok(!/\r?\n/.test(before.result.error), 'error is one readable line, not a PowerShell dump');
+    const after = await windowDelivery(t, 'focus-lost-after-paste');
+    assert.deepStrictEqual(after.events, ['activate:1234', 'clipboard:test prompt', 'keys:^v']);
+    assert.match(after.result.error, /Enter was not sent/);
+  });
+
+test('existing windows are delivered before new sessions steal focus; results keep input order', async () => {
+  schedules.set(20, { id: 20, status: 'waiting', sessions: [
+    { type: 'new', prompt: 'n1', label: 'N1' }, { type: 'existing', pid: 1, prompt: 'e1' },
+    { type: 'new', prompt: 'n2', label: 'N2' }, { type: 'existing', pid: 2, prompt: 'e2' }
+  ] });
+  const calls = [];
+  await fire(20, {
+    openNewClaudeSession: async prompt => { calls.push(prompt); return { status: 'started', prompt }; },
+    sendToExistingWindow: async (pid, prompt) => { calls.push(prompt); return { status: 'sent', prompt }; }
+  });
+  assert.deepStrictEqual(calls, ['e1', 'e2', 'n1', 'n2']);
+  assert.deepStrictEqual(schedules.get(20).results.map(r => r.prompt), ['n1', 'e1', 'n2', 'e2']);
+});
+
+test('schedules firing in the same tick never deliver concurrently', async () => {
+  for (const id of [21, 22]) {
+    schedules.set(id, { id, status: 'waiting', sessions: [
+      { type: 'existing', pid: id, prompt: `${id}a` }, { type: 'existing', pid: id, prompt: `${id}b` }
+    ] });
+  }
+  let active = 0;
+  const log = [];
+  const deliver = async (pid, prompt) => {
+    assert.strictEqual(++active, 1, 'another delivery was in progress');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    log.push(prompt);
+    active--;
+    if (prompt === '21a') throw new Error('first schedule failure must not block the next one');
+    return { status: 'sent' };
+  };
+  await Promise.all([21, 22].map(id => fire(id, { sendToExistingWindow: deliver })));
+  assert.deepStrictEqual(log, ['21a', '21b', '22a', '22b']);
+  assert.strictEqual(schedules.get(21).results[0].status, 'error');
+  assert.strictEqual(schedules.get(22).status, 'executed');
+});
+
+// Run the real generated new-session script with node.exe standing in for
+// claude.exe, so the exact argv Claude Code would receive is observable.
+test('new session passes the attachment prompt to claude.exe as one exact argument',
+  { skip: process.platform !== 'win32' }, async t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'autosend new session '));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const dump = path.join(root, 'dump.js');
+    const out = path.join(root, 'argv.json');
+    fs.writeFileSync(dump, `require('fs').writeFileSync(${JSON.stringify(out)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }))`);
+    const attachmentDir = path.join(root, 'schedules.json.attachments', 'a b é');
+    const prompt = '-starts with a dash\n"quoted" \'single\' $env:X %PATH% & | ^ `tick` ação 😀\n' +
+      `- "notes.txt": ${JSON.stringify(path.join(attachmentDir, 'f.txt'))}\ntrailing backslash \\`;
+    const module = { exports: {} };
+    const source = path.join(__dirname, '../server.js');
+    let launched;
+    vm.runInNewContext(fs.readFileSync(source, 'utf8'), {
+      module, __dirname: path.dirname(source), console, setTimeout, clearTimeout, Buffer,
+      process: { env: { DATA_FILE: path.join(root, 'schedules.json'), CLAUDE_BIN: process.execPath,
+        CLAUDE_FLAGS: `"${dump}"` }, cwd: () => root, pid: process.pid },
+      require: id => {
+        if (id !== 'child_process') return require(id);
+        return { exec(command, options, callback) {
+          // Replace Start-Process (a visible window) with running the same script inline.
+          const script = /'-File','((?:[^']|'')+)'/.exec(command)[1].replace(/''/g, "'");
+          launched = script;
+          execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+            { windowsHide: true, timeout: 15000 }, callback);
+        } };
+      }
+    }, { filename: source });
+    const api = module.exports;
+    api.schedules.set(30, { id: 30, status: 'waiting', sessions: [{ type: 'new', prompt, label: 'Sessão "1"' }] });
+    await api.fire(30);
+    assert.strictEqual(api.schedules.get(30).results[0].status, 'started', JSON.stringify(api.schedules.get(30).results));
+    const got = JSON.parse(fs.readFileSync(out, 'utf8'));
+    assert.deepStrictEqual(got.argv, ['--', prompt]);
+    assert.strictEqual(fs.realpathSync.native(got.cwd), fs.realpathSync.native(root));
+    assert.ok(!fs.existsSync(launched), 'run script removes itself');
+    assert.ok(!fs.existsSync(launched.replace(/claude_run_(.+)\.ps1$/, 'claude_args_$1.txt')), 'argument file is removed');
+
+    // With attachments, --add-dir must not swallow the prompt.
+    fs.rmSync(out);
+    api.schedules.set(31, { id: 31, status: 'waiting', attachmentDir, sessions: [{ type: 'new', prompt }] });
+    const { openNewClaudeSession } = api;
+    await api.fire(31, { openNewClaudeSession: (p, label) => openNewClaudeSession(p, label, attachmentDir) });
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(out, 'utf8')).argv, ['--add-dir', attachmentDir, '--', prompt]);
+  });
+
+test('an over-long new-session prompt fails clearly instead of launching a broken window', async () => {
+  const { openNewClaudeSession } = require('../server.js');
+  const bin = process.env.CLAUDE_BIN;
+  process.env.CLAUDE_BIN = process.execPath;
+  try {
+    await assert.rejects(openNewClaudeSession('x'.repeat(40000), 'Long'), /too long/);
+  } finally {
+    if (bin === undefined) delete process.env.CLAUDE_BIN; else process.env.CLAUDE_BIN = bin;
+  }
+});
