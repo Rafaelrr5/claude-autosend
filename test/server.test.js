@@ -430,7 +430,8 @@ test('new session passes the attachment prompt to claude.exe as one exact argume
 test('an over-long new-session prompt fails clearly instead of launching a broken window', async () => {
   const { openNewClaudeSession } = require('../server.js');
   const bin = process.env.CLAUDE_BIN;
-  process.env.CLAUDE_BIN = process.execPath;
+  // The length check runs before anything is launched, so no real binary is needed.
+  process.env.CLAUDE_BIN = 'C:\\claude\\claude.exe';
   try {
     await assert.rejects(openNewClaudeSession('x'.repeat(40000), 'Long'), /too long/);
   } finally {
