@@ -30,8 +30,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check public/app.js",
-    "test": "node --test test/server.test.js test/attachments.test.js test/frontend.test.js"
+    "check": "node --check server.js && node --check public/app.js && node --check launcher.cjs && node --check build-windows.cjs",
+    "test": "node --test test/server.test.js test/attachments.test.js test/frontend.test.js test/launcher.test.js",
+    "build:windows": "node build-windows.cjs"
   },
   "dependencies": {
     "express": "^4.18.2"

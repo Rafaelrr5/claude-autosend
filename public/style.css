@@ -804,6 +804,56 @@ textarea {
 }
 
 /* ============================================
+   Portable app status & first-run guide
+   ============================================ */
+
+.app-status-line {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.app-status-line code,
+.app-status .hint code {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.app-status-warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.app-status a,
+.guide-card a {
+  color: var(--text-accent);
+}
+
+.app-status-actions {
+  margin-top: 16px;
+}
+
+.guide-card summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.guide-list {
+  margin: 16px 0 0 20px;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.guide-list li + li {
+  margin-top: 8px;
+}
+
+/* ============================================
    Responsive
    ============================================ */
 

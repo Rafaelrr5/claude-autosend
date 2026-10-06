@@ -29,6 +29,79 @@ A schedule can mix both, so one trigger can fan out across several sessions. Exi
 - Node.js 18+
 - [Claude Code CLI](https://claude.com/claude-code) on your `PATH` (`claude --version` should work)
 
+## Windows portable (no Node.js needed)
+
+Download [Claude-Autosend-Windows-x64.zip](https://github.com/Rafaelrr5/claude-autosend/releases/download/v0.1.0-windows-preview/Claude-Autosend-Windows-x64.zip) (unsigned preview), extract it, and double-click
+**Abrir-Claude-Autosend**. The folder carries its own Node.js runtime and
+dependencies, so no terminal, Node.js or npm install is needed.
+
+[Claude Code](https://code.claude.com/docs/en/setup) itself is **not** bundled:
+install it and sign in once before scheduling anything. Normal Claude Code
+permission prompts stay on.
+
+- Schedules, attachment copies and logs live in
+  `%LOCALAPPDATA%\3R Studios\Claude Autosend`, never in the extracted folder.
+- New sessions start in your user folder. To use a project folder, put its path
+  in `pasta-do-projeto.txt` in that data folder and reopen the app.
+- The server binds `127.0.0.1:3847` only. If another program holds the port, the
+  launcher says so instead of opening that program's page. Double-clicking again
+  while it runs just reopens the dashboard; **Encerrar Claude Autosend** in the
+  dashboard stops it (local, token-protected).
+- If VBScript is disabled on your Windows, run `app\abrir-com-janela.cmd`
+  instead (it keeps a console window open).
+
+Build it yourself on Windows x64 with `npm run build:windows` (needs Python 3
+for the ZIP step). It copies the running `node.exe`, runs
+`npm ci --omit=dev --ignore-scripts`, writes third-party notices and produces
+`dist/Claude-Autosend-Windows-x64.zip` plus a file list with SHA-256 hashes.
+
+<!-- guia-ptbr:inicio -->
+### Guia rápido (português)
+
+**O que é:** o Claude Autosend agenda textos (prompts) para o Claude Code que
+está instalado **neste computador**. Ele não é um chat online e não funciona
+sozinho: no horário marcado, entrega o seu texto ao Claude Code daqui.
+
+**Antes de usar**
+
+1. Instale o Claude Code e entre na sua conta nele uma vez:
+   https://code.claude.com/docs/en/setup
+2. Extraia (descompacte) o ZIP inteiro numa pasta, por exemplo em Documentos.
+3. Clique duas vezes em **Abrir-Claude-Autosend**. Se o Windows perguntar se
+   deseja abrir o arquivo, escolha **Abrir**. O painel abre no navegador.
+
+**Como usar**
+
+1. Digite o horário com 4 números (ex.: `0400` para 4h da manhã).
+2. Escolha como enviar:
+   - **New Claude session**: abre uma janela nova do Claude na pasta do projeto.
+   - **Existing window**: cola o texto numa janela do Claude que já está aberta.
+     O computador precisa estar desbloqueado e ninguém deve usar o teclado
+     nesse momento.
+3. Escreva o texto e clique em **Schedule**.
+
+**Importante**
+
+- Deixe o computador **ligado e acordado** (sem suspender nem hibernar) até o
+  horário. Horários que passam com o programa fechado não são enviados depois.
+- Fechar o navegador **não** desliga o programa. Para desligar, use o botão
+  **Encerrar Claude Autosend** no painel. Para abrir de novo, clique duas vezes
+  em **Abrir-Claude-Autosend**.
+- O Claude pode **pausar e pedir sua permissão** antes de agir. Isso é normal e
+  protege seus arquivos; se você não estiver por perto, a tarefa espera. Este
+  programa não desliga essas proteções.
+- Pasta do projeto: as sessões novas abrem na sua pasta de usuário. Para usar
+  outra pasta, edite o arquivo `pasta-do-projeto.txt` (o painel mostra onde ele
+  fica), salve, encerre e abra o programa de novo.
+- Seus agendamentos, anexos e registros ficam em
+  `%LOCALAPPDATA%\3R Studios\Claude Autosend`. Para remover tudo, apague a
+  pasta do programa e essa pasta.
+- Se aparecer um aviso de que a porta 3847 está em uso, feche o outro programa
+  que usa essa porta ou reinicie o computador.
+- Se o Abrir-Claude-Autosend não funcionar no seu Windows, use
+  `app\abrir-com-janela.cmd` e deixe a janela aberta.
+<!-- guia-ptbr:fim -->
+
 ## Install
 
 ```bash

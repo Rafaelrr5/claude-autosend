@@ -36,6 +36,29 @@
 
     <!-- Main Content -->
     <main class="main">
+      <!-- Portable app status (filled in only when started by the Windows launcher) -->
+      <section class="card app-status" id="appStatus" hidden>
+        <p class="app-status-line" id="claudeStatus"></p>
+        <p class="app-status-line">Sessões novas abrem na pasta: <code id="workdirPath"></code></p>
+        <p class="hint">Para usar outra pasta, edite o arquivo <code id="workdirFile"></code> e abra o Claude Autosend de novo.</p>
+        <div class="app-status-actions">
+          <button type="button" class="btn btn-outline btn-sm" id="stopApp">Encerrar Claude Autosend</button>
+        </div>
+      </section>
+
+      <!-- First-run guide (pt-BR) -->
+      <details class="card guide-card" id="guide" open>
+        <summary>Primeiros passos — leia uma vez</summary>
+        <ol class="guide-list">
+          <li><strong>Não é um chat online.</strong> O Claude Autosend roda só neste computador. No horário marcado, ele entrega o seu texto ao <strong>Claude Code instalado aqui</strong>.</li>
+          <li><strong>Antes de tudo:</strong> instale o Claude Code e entre na sua conta nele uma vez, seguindo o <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noopener noreferrer">guia oficial de instalação</a>. Sem isso, nada é enviado.</li>
+          <li><strong>Deixe o computador ligado e acordado</strong> (sem suspender nem hibernar) até o horário. Fechar o navegador não desliga o programa; o botão <em>Encerrar</em> desliga. Para abrir de novo, clique duas vezes em <em>Abrir-Claude-Autosend</em>.</li>
+          <li><strong>Dois jeitos de enviar:</strong> <em>New Claude session</em> abre uma janela nova do Claude na pasta indicada acima. <em>Existing window</em> cola o texto numa janela do Claude que já está aberta — para isso o computador precisa estar desbloqueado e sem ninguém usando o teclado naquele momento.</li>
+          <li><strong>O Claude pode pausar e pedir sua permissão</strong> antes de agir. Isso é normal e protege seus arquivos; se você não estiver por perto, a tarefa espera por você. Este programa não desliga essas proteções.</li>
+          <li>Um horário que passa com o programa fechado <strong>não é enviado depois</strong>.</li>
+        </ol>
+      </details>
+
       <!-- Schedule Form -->
       <section class="card form-card">
         <div class="card-header">
@@ -148,5 +171,39 @@
   </div>
 
   <script src="app.js"></script>
+  <script>
+    // Status and stop control for the portable Windows launcher (absent with `npm start`).
+    (function () {
+      var guide = document.getElementById('guide');
+      if (localStorage.getItem('guideSeen')) guide.open = false;
+      guide.addEventListener('toggle', function () { if (!guide.open) localStorage.setItem('guideSeen', '1'); });
+
+      fetch('/api/app-info', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (info) {
+        if (!info || info.app !== 'claude-autosend') return;
+        var claude = document.getElementById('claudeStatus');
+        if (info.claudeFound) {
+          claude.textContent = 'Claude Code encontrado neste computador. Lembre-se de ter entrado na sua conta nele.';
+        } else {
+          claude.className += ' app-status-warning';
+          claude.textContent = 'Claude Code não foi encontrado neste computador. Instale e entre na sua conta antes de agendar: ';
+          var link = document.createElement('a');
+          link.href = info.installDocs; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          link.textContent = 'guia oficial de instalação';
+          claude.appendChild(link);
+          claude.appendChild(document.createTextNode('. Depois, recarregue esta página.'));
+        }
+        document.getElementById('workdirPath').textContent = info.workdir;
+        document.getElementById('workdirFile').textContent = info.workdirFile;
+        document.getElementById('stopApp').addEventListener('click', function () {
+          if (!confirm('Encerrar o Claude Autosend?\n\nAgendamentos pendentes não serão enviados enquanto ele estiver fechado. Para abrir de novo, clique duas vezes em Abrir-Claude-Autosend.')) return;
+          fetch('/api/app/stop', { method: 'POST', headers: { 'X-Autosend-Token': info.stopToken } }).then(function (r) {
+            if (!r.ok) throw new Error();
+            document.querySelector('.main').innerHTML = '<section class="card"><h2>Claude Autosend encerrado.</h2><p class="hint">Pode fechar esta aba. Para abrir de novo, clique duas vezes em Abrir-Claude-Autosend.</p></section>';
+          }).catch(function () { alert('Não foi possível encerrar agora. Tente de novo.'); });
+        });
+        document.getElementById('appStatus').hidden = false;
+      }).catch(function () {});
+    })();
+  </script>
 </body>
 </html>

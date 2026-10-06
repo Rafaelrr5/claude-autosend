@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const { exec } = require('child_process');
 const path = require('path');
 const os = require('os');
@@ -594,6 +595,32 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+// Bind first, then load DATA_FILE: a second copy that finds the port taken
+// fails before it can rewrite schedules owned by the running one.
+// `handler` lets the portable launcher wrap the app with its own routes.
+function start(handler = app) {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer(handler);
+    server.once('error', reject);
+    server.listen(PORT, HOST, () => {
+      try {
+        restore();
+        // Write once at boot: an unwritable DATA_FILE must fail now, not at 04:00.
+        persist();
+      } catch (err) {
+        server.close();
+        return reject(err);
+      }
+      console.log(`claude-autosend running at http://${HOST}:${PORT}`);
+      console.log(`  timezone : ${TIMEZONE}`);
+      console.log(`  workdir  : ${CLAUDE_WORKDIR}`);
+      console.log(`  cli flags: ${CLAUDE_FLAGS || '(none)'}`);
+      console.log(`  data file: ${DATA_FILE}`);
+      resolve(server);
+    });
+  });
+}
+
 if (require.main === module) {
   if (process.platform !== 'win32') {
     console.error('claude-autosend drives Windows windows via PowerShell and only runs on Windows.');
@@ -605,18 +632,11 @@ if (require.main === module) {
     process.exit(1);
   }
 
-  restore();
-  // Write once at boot: an unwritable DATA_FILE must fail now, not at 04:00.
-  persist();
-
-  app.listen(PORT, HOST, () => {
-    console.log(`claude-autosend running at http://${HOST}:${PORT}`);
-    console.log(`  timezone : ${TIMEZONE}`);
-    console.log(`  workdir  : ${CLAUDE_WORKDIR}`);
-    console.log(`  cli flags: ${CLAUDE_FLAGS || '(none)'}`);
-    console.log(`  data file: ${DATA_FILE}`);
+  start().catch(err => {
+    console.error(err.message);
+    process.exit(1);
   });
 }
 
 module.exports = { app, fire, msUntilTarget, isValidTime, psq, persist, restore, schedules, DATA_FILE, ATTACHMENTS_DIR,
-  openNewClaudeSession };
+  openNewClaudeSession, findClaudeExe, start, PORT, HOST, CLAUDE_WORKDIR };
